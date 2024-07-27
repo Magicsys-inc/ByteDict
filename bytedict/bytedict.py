@@ -82,3 +82,77 @@ class GlobalDictionary:
     def get_embedding(self, hash_value: bytes) -> list[float]:
         """Retrieve the embedding for a given hash."""
         return self.embedding_store.get(hash_value, [])
+
+
+class Tokenizer:
+    def __init__(self, global_dict: "GlobalDictionary"):
+        self.global_dict = global_dict
+
+    def tokenize_and_embed(self, text: str | bytes) -> list[bytes]:
+        """
+        Tokenize the input text into sentences, phrases, words, and characters,
+        and embed them into the dictionary.
+        Returns a list of hashes corresponding to the tokens.
+        """
+        text = ensure_str(text)
+        sentence_tokens = re.split(r"(?<=[.!?]) +", text)  # Split text into sentences
+        token_hashes = []
+
+        for sentence in sentence_tokens:
+            sentence_hash = self.global_dict.get_hash(sentence)
+            if sentence_hash in self.global_dict.phrase_store:
+                token_hashes.append(sentence_hash)
+            else:
+                # Break the sentence into phrases
+                phrases = re.split(r"[,;]", sentence)
+                phrase_hashes = []
+                for phrase in phrases:
+                    phrase_hash = self.global_dict.get_hash(phrase)
+                    if phrase_hash in self.global_dict.phrase_store:
+                        token_hashes.append(phrase_hash)
+                    else:
+                        phrase_hashes.append(phrase)
+
+                # Process remaining phrases
+                for phrase in phrase_hashes:
+                    # Break the phrase into words
+                    words = re.findall(r"\w+|[^\w\s]", phrase)
+                    word_hashes = []
+                    for word in words:
+                        word_hash = self.global_dict.get_hash(word)
+                        if word_hash in self.global_dict.word_store:
+                            token_hashes.append(word_hash)
+                        else:
+                            word_hashes.append(word)
+
+                    # Process remaining words
+                    for word in word_hashes:
+                        # Break the word into characters
+                        char_hashes = []
+                        for char in word:
+                            char_hash = self.global_dict.get_hash(char)
+                            if char_hash not in self.global_dict.char_store:
+                                self.global_dict.add_char(char)
+                            char_hashes.append(char_hash)
+                        # After processing the characters, add the word to the dictionary
+                        combined_word_hash = self.global_dict.get_hash(
+                            b"".join(char_hashes)
+                        )
+                        self.global_dict.add_word(word)
+                        token_hashes.append(combined_word_hash)
+
+                    # After processing the words, add the phrase to the dictionary
+                    combined_phrase_hash = self.global_dict.get_hash(
+                        b"".join(token_hashes[-len(words) :])
+                    )
+                    self.global_dict.add_phrase(phrase)
+                    token_hashes.append(combined_phrase_hash)
+
+                # After processing the phrases, add the sentence to the dictionary
+                combined_sentence_hash = self.global_dict.get_hash(
+                    b"".join(token_hashes[-len(phrases) :])
+                )
+                self.global_dict.add_phrase(sentence)
+                token_hashes.append(combined_sentence_hash)
+
+        return token_hashes
